@@ -148,6 +148,13 @@ SECTIONS
 		*(__fw_ftr_fixup)
 		__stop___fw_ftr_fixup = .;
 	}
+
+	. = ALIGN(8);
+	__mmu_ftr_fixup_c :  AT(ADDR(__mmu_ftr_fixup_c) - LOAD_OFFSET) {
+		__start___mmu_ftr_fixup_c = .;
+		*(__mmu_ftr_fixup_c)
+		__stop___mmu_ftr_fixup_c = .;
+	}
 #endif
 	.init.ramfs : AT(ADDR(.init.ramfs) - LOAD_OFFSET) {
 		INIT_RAM_FS

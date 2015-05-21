@@ -80,5 +80,10 @@ int module_finalize(const Elf_Ehdr *hdr,
 				 (void *)sect->sh_addr,
 				 (void *)sect->sh_addr + sect->sh_size);
 
+	sect = find_section(hdr, sechdrs, "__mmu_ftr_fixup_c");
+	if (sect != NULL)
+		do_feature_fixups_in_c(cur_cpu_spec->mmu_features,
+				       (void *)sect->sh_addr,
+				       (void *)sect->sh_addr + sect->sh_size);
 	return 0;
 }

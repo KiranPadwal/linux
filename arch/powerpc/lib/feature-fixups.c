@@ -31,6 +31,13 @@ struct fixup_entry {
 	long		alt_end_off;
 };
 
+struct ftr_fixup_entry {
+	unsigned long feature_bit;
+	int *code;
+	unsigned long true_target;
+	unsigned long false_target;
+};
+
 static unsigned int *calc_addr(struct fixup_entry *fcur, long offset)
 {
 	/*
@@ -149,6 +156,36 @@ void do_final_fixups(void)
 		dest++;
 	}
 #endif
+}
+
+void do_feature_fixups_in_c(unsigned long value, void *fixup_start,
+			    void *fixup_end)
+{
+	unsigned long target;
+	struct ftr_fixup_entry *fcur, *fend;
+
+	fcur = fixup_start;
+	fend = fixup_end;
+
+	for (; fcur < fend; fcur++) {
+		if (fcur->code &&
+		    kernel_text_address((unsigned long)fcur->code)) {
+			if (value & fcur->feature_bit)
+				target = fcur->true_target;
+			else
+				target = fcur->false_target;
+
+			/* Are we looping ? */
+			if ((unsigned long)fcur->code == target)
+				continue;
+
+			if (patch_branch(fcur->code, target, 0)) {
+				WARN_ON(1);
+				pr_err("Unable to patch radix section at %p\n",
+				       fcur->code);
+			}
+		}
+	}
 }
 
 #ifdef CONFIG_FTR_FIXUP_SELFTEST

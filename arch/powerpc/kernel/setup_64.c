@@ -477,6 +477,9 @@ void __init setup_system(void)
 			  &__start___mmu_ftr_fixup, &__stop___mmu_ftr_fixup);
 	do_feature_fixups(powerpc_firmware_features,
 			  &__start___fw_ftr_fixup, &__stop___fw_ftr_fixup);
+	do_feature_fixups_in_c(cur_cpu_spec->mmu_features,
+			       &__start___mmu_ftr_fixup_c,
+			       &__stop___mmu_ftr_fixup_c);
 	do_lwsync_fixups(cur_cpu_spec->cpu_features,
 			 &__start___lwsync_fixup, &__stop___lwsync_fixup);
 	do_final_fixups();

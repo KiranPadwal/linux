@@ -3,6 +3,7 @@
 #ifdef __KERNEL__
 
 #include <linux/types.h>
+#include <linux/jump_label.h>
 
 #include <asm/asm-compat.h>
 #include <asm/feature-fixups.h>
@@ -149,6 +150,7 @@ static inline void mmu_clear_feature(unsigned long feature)
 }
 
 extern unsigned int __start___mmu_ftr_fixup, __stop___mmu_ftr_fixup;
+extern unsigned int __start___mmu_ftr_fixup_c, __stop___mmu_ftr_fixup_c;
 
 #ifdef CONFIG_PPC64
 /* This is our real memory area size on ppc64 server, on embedded, we
@@ -165,6 +167,32 @@ static inline void assert_pte_locked(struct mm_struct *mm, unsigned long addr)
 {
 }
 #endif /* !CONFIG_DEBUG_VM */
+
+#ifdef HAVE_JUMP_LABEL
+static __always_inline bool mmu_feature_enabled(unsigned long feature)
+{
+	asm_volatile_goto("1:\n\t"
+			  ".pushsection __mmu_ftr_fixup_c,  \"a\"\n\t"
+			  JUMP_ENTRY_TYPE "%0\n\t" /* feature bit */
+			  JUMP_ENTRY_TYPE "1b\n\t"
+			  JUMP_ENTRY_TYPE "%l[l_true]\n\t"
+			  JUMP_ENTRY_TYPE "%l[l_false]\n\t"
+			  ".popsection\n\t"
+			  : : "i"(feature) : : l_true, l_false);
+	if (mmu_has_feature(feature))
+l_true:
+		return true;
+l_false:
+	return false;
+}
+#else
+static __always_inline bool mmu_feature_enabled(unsigned long feature)
+{
+	if (mmu_has_feature(feature))
+		return true;
+	return false;
+}
+#endif
 
 #endif /* !__ASSEMBLY__ */
 
