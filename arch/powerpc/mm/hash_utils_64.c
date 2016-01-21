@@ -694,8 +694,8 @@ int remove_section_mapping(unsigned long start, unsigned long end)
 }
 #endif /* CONFIG_MEMORY_HOTPLUG */
 
-static void __init hash_init_partition_table(phys_addr_t hash_table,
-					     unsigned long htab_size)
+static void __init hash_partition_table_initialize(phys_addr_t hash_table,
+						   unsigned long htab_size)
 {
 	unsigned long ps_field;
 	unsigned long patb_size = 1UL << PATB_SIZE_SHIFT;
@@ -714,18 +714,59 @@ static void __init hash_init_partition_table(phys_addr_t hash_table,
 	/* Initialize the Partition Table with no entries */
 	memset((void *)partition_tb, 0, patb_size);
 	partition_tb->patb0 = cpu_to_be64(ps_field | hash_table | htab_size);
-	/*
-	 * FIXME!! This should be done via update_partition table
-	 * For now UPRT is 0 for us.
-	 */
-	partition_tb->patb1 = 0;
+	if (!mmu_has_feature(MMU_FTR_TYPE_SEG_TABLE))
+		partition_tb->patb1 = 0;
 	pr_info("Partition table %p\n", partition_tb);
 	/*
 	 * update partition table control register,
 	 * 64 K size.
 	 */
 	mtspr(SPRN_PTCR, __pa(partition_tb) | (PATB_SIZE_SHIFT - 12));
+}
 
+static unsigned long  __init hash_process_table_initialize(void)
+{
+	unsigned long prtb;
+	unsigned long sllp;
+	unsigned long prtps_field;
+	unsigned long process_tb_vsid;
+	unsigned long prtb_align_size;
+	unsigned long prtb_size = 1UL << PRTB_SIZE_SHIFT;
+
+	prtb_align_size = 1UL << mmu_psize_defs[mmu_linear_psize].shift;
+	/*
+	 * Allocate process table
+	 */
+	BUILD_BUG_ON_MSG((PRTB_SIZE_SHIFT > 23), "Process table size too large.");
+	prtb = memblock_alloc_base(prtb_size, prtb_align_size, MEMBLOCK_ALLOC_ANYWHERE);
+	/*
+	 * Map this to start of process table segment.
+	 */
+	process_tb = (void *)H_SEG_PROC_TBL_START;
+	htab_bolt_mapping(H_SEG_PROC_TBL_START,
+			  H_SEG_PROC_TBL_START + prtb_size, prtb,
+			  pgprot_val(PAGE_KERNEL),
+			  mmu_linear_psize, MMU_SEGSIZE_1T);
+
+	/* Initialize the process table with no entries */
+	memset((void *)prtb, 0, prtb_size);
+	/*
+	 * Now fill the partition table. This should be page size
+	 * use to map the segment table.
+	 */
+	sllp = get_sllp_encoding(mmu_linear_psize);
+
+	prtps_field = sllp << 5;
+	process_tb_vsid = get_kernel_vsid((unsigned long)process_tb,
+					  MMU_SEGSIZE_1T);
+	pr_info("Process table %p (%p)  and vsid 0x%lx\n", process_tb,
+		(void *)prtb, process_tb_vsid);
+	process_tb_vsid <<= 25;
+	/*
+	 * Fill in the partition table
+	 */
+	ppc_md.update_partition_table(process_tb_vsid | prtps_field | (PRTB_SIZE_SHIFT - 12));
+	return prtb;
 }
 
 static void __init htab_initialize(void)
@@ -800,7 +841,7 @@ static void __init htab_initialize(void)
 			/* Set SDR1 */
 			mtspr(SPRN_SDR1, _SDR1);
 		else
-			hash_init_partition_table(table, htab_size_bytes);
+			hash_partition_table_initialize(table, htab_size_bytes);
 	}
 
 	prot = pgprot_val(PAGE_KERNEL);
@@ -885,6 +926,7 @@ static void __init htab_initialize(void)
 #undef KB
 #undef MB
 
+static DEFINE_SPINLOCK(init_segtbl_lock);
 void __init hash__early_init_mmu(void)
 {
 	/*
@@ -923,7 +965,22 @@ void __init hash__early_init_mmu(void)
 	 */
 	htab_initialize();
 
-	pr_info("Initializing hash mmu with SLB\n");
+	if (mmu_has_feature(MMU_FTR_TYPE_SEG_TABLE)) {
+		unsigned long prtb;
+		unsigned long lpcr;
+		/*
+		 * setup LPCR UPRT based on mmu_features
+		 */
+		if (!firmware_has_feature(FW_FEATURE_LPAR)) {
+			lpcr = mfspr(SPRN_LPCR);
+			mtspr(SPRN_LPCR, lpcr | LPCR_UPRT);
+		}
+		prtb = hash_process_table_initialize();
+		init_mm.context.seg_tbl_lock = &init_segtbl_lock;
+		init_mm.context.seg_table = segment_table_initialize((struct prtb_entry *)prtb);
+		pr_info("Initializing hash mmu with in-memory segment table\n");
+	} else
+		pr_info("Initializing hash mmu with SLB\n");
 	/* Initialize SLB management */
 	slb_initialize();
 }
@@ -931,6 +988,17 @@ void __init hash__early_init_mmu(void)
 #ifdef CONFIG_SMP
 void hash__early_init_mmu_secondary(void)
 {
+	if (mmu_has_feature(MMU_FTR_TYPE_SEG_TABLE)) {
+		unsigned long lpcr;
+		/*
+		 * setup LPCR UPRT based on mmu_features
+		 */
+		if (!firmware_has_feature(FW_FEATURE_LPAR)) {
+			lpcr = mfspr(SPRN_LPCR);
+			mtspr(SPRN_LPCR, lpcr | LPCR_UPRT);
+		}
+	}
+
 	/* Initialize hash table for that CPU */
 	if (!firmware_has_feature(FW_FEATURE_LPAR)) {
 		if (!cpu_has_feature(CPU_FTR_ARCH_300))

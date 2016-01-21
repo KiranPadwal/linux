@@ -24,6 +24,10 @@
  * Radix page table available
  */
 #define MMU_FTR_TYPE_RADIX		ASM_CONST(0x00000040)
+
+/* Seg table only supported for book3s 64 */
+#define MMU_FTR_TYPE_SEG_TABLE		ASM_CONST(0x00000080)
+
 /*
  * individual features
  */
@@ -129,7 +133,7 @@ enum {
 		MMU_FTR_LOCKLESS_TLBIE | MMU_FTR_CI_LARGE_PAGE |
 		MMU_FTR_1T_SEGMENT | MMU_FTR_TLBIE_CROP_VA |
 #ifdef CONFIG_PPC_RADIX_MMU
-		MMU_FTR_TYPE_RADIX |
+		MMU_FTR_TYPE_RADIX | MMU_FTR_TYPE_SEG_TABLE |
 #endif
 		0,
 };

@@ -65,6 +65,7 @@ extern struct patb_entry *partition_tb;
  */
 #define PATB_SIZE_SHIFT	16
 
+extern unsigned long segment_table_initialize(struct prtb_entry *prtb);
 typedef unsigned long mm_context_id_t;
 struct spinlock;
 
@@ -94,6 +95,9 @@ typedef struct {
 #ifdef CONFIG_SPAPR_TCE_IOMMU
 	struct list_head iommu_group_mem_list;
 #endif
+	unsigned long seg_table;
+	struct spinlock *seg_tbl_lock;
+
 } mm_context_t;
 
 /*

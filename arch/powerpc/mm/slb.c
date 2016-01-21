@@ -26,6 +26,8 @@
 #include <asm/code-patching.h>
 
 #include <linux/context_tracking.h>
+#include <linux/slab.h>
+#include <linux/memblock.h>
 
 enum slb_index {
 	LINEAR_INDEX	= 0, /* Kernel linear map  (0xc000000000000000) */
@@ -199,6 +201,13 @@ void switch_slb(struct task_struct *tsk, struct mm_struct *mm)
 	unsigned long stack = KSTK_ESP(tsk);
 	unsigned long exec_base;
 
+	if (cpu_has_feature(CPU_FTR_ARCH_300)) {
+		mtspr(SPRN_PID, mm->context.id);
+		__slb_flush_and_rebolt();
+		copy_mm_to_paca(&mm->context);
+		return;
+	}
+
 	/*
 	 * We need interrupts hard-disabled here, not just soft-disabled,
 	 * so that a PMU interrupt can't occur, which might try to access
@@ -349,11 +358,350 @@ void slb_initialize(void)
 	asm volatile("isync":::"memory");
 }
 
+static inline bool seg_entry_valid(struct seg_entry *entry)
+{
+	return !!(be64_to_cpu(entry->ste_e) & STE_VALID);
+}
+
+static inline bool seg_entry_bolted(struct seg_entry *entry)
+{
+	return !!(be64_to_cpu(entry->ste_v) & STE_BOLTED);
+}
+
+static inline bool seg_entry_match(struct seg_entry *entry, unsigned long esid,
+				   int ssize)
+{
+	unsigned long ste_ssize;
+	unsigned long ste_esid;
+
+	ste_esid = be64_to_cpu(entry->ste_e) >> 28;
+	ste_ssize = (be64_to_cpu(entry->ste_v) >> 62) & 0x3;
+	if (ste_esid == esid && ste_ssize == ssize)
+		return true;
+	return false;
+}
+
+#define STE_PER_STEG 8
+static inline bool ste_present(unsigned long seg_table, unsigned long ste_group,
+			       unsigned long esid, int ssize)
+{
+	int i;
+	struct seg_entry *entry;
+
+	entry = (struct seg_entry *)(seg_table + (ste_group << 7));
+	for (i = 0; i < STE_PER_STEG; i++) {
+		/* Do we need a smp_rmb() here to make sure we load
+		 * the second half only after the entry is found to be
+		 * valid ?
+		 */
+		if (seg_entry_valid(entry) && seg_entry_match(entry, esid, ssize))
+			return true;
+		entry++;
+	}
+	return false;
+}
+
+static inline struct seg_entry *get_free_ste(unsigned long seg_table,
+					     unsigned long ste_group)
+{
+	int i;
+	struct seg_entry *entry;
+
+	entry = (struct seg_entry *)(seg_table + (ste_group << 7));
+	for (i = 0; i < STE_PER_STEG; i++) {
+		if (!seg_entry_valid(entry))
+			return entry;
+		entry++;
+	}
+	return NULL;
+
+}
+
+static struct seg_entry *get_random_ste(unsigned long seg_table,
+					unsigned long ste_group)
+{
+	int i;
+	struct seg_entry *entry;
+
+again:
+	/* Randomly pick a slot */
+	i = mftb() & 0x7;
+
+	/* randomly pick pimary or secondary */
+	if (mftb() & 0x1)
+		ste_group = ~ste_group;
+
+	entry = (struct seg_entry *)(seg_table + (ste_group << 7));
+	if (seg_entry_bolted(entry + i))
+		goto again;
+
+	return entry + i;
+
+}
+static void do_segment_load(unsigned long seg_table, unsigned long ea,
+			    unsigned long vsid, int ssize, int psize,
+			    unsigned long protection, bool bolted)
+{
+	unsigned long esid;
+	unsigned long ste_group;
+	struct seg_entry *entry;
+	unsigned long ste_e, ste_v;
+	unsigned long steg_group_mask;
+
+	if (ssize == MMU_SEGSIZE_256M) {
+		esid = GET_ESID(ea);
+		/*
+		 * group mask for 256M segment is.
+		 * 35 - segment table size shift - 43
+		 */
+		steg_group_mask = ((1UL << (mmu_psize_defs[mmu_linear_psize].shift  - 7)) - 1);
+		ste_group = esid &  steg_group_mask;
+	} else {
+		esid = GET_ESID_1T(ea);
+		/*
+		 * group mask for 1T segment is.
+		 * 25 - segment table size shift - 31
+		 */
+		steg_group_mask = ((1UL << (mmu_psize_defs[mmu_linear_psize].shift  - 5)) - 1);
+		ste_group = esid &  steg_group_mask;
+	}
+
+	if (ste_present(seg_table, ste_group, esid, ssize))
+		return;
+	/*
+	 * check the secondary
+	 */
+	if (ste_present(seg_table, ~ste_group, esid, ssize))
+		return;
+
+	/*
+	 * search for a free slot in primary
+	 */
+
+	entry = get_free_ste(seg_table, ste_group);
+	if (!entry) {
+		/* search the secondary */
+		entry = get_free_ste(seg_table, ~ste_group);
+		if (!entry) {
+			entry = get_random_ste(seg_table, ste_group);
+			if (!entry)
+				return;
+		}
+	}
+	/*
+	 * update the valid bit to 0, FIXME!! Do we need
+	 * to do a translation cache invalidation for the entry we
+	 * are stealing ? The translation is still valid.
+	 */
+	entry->ste_e &= ~cpu_to_be64(STE_VALID);
+	/*
+	 * Make sure everybody see the valid bit cleared, before they
+	 * see the update to other part of ste.
+	 */
+	smp_mb();
+
+	ste_v = (unsigned long)ssize << 62;
+	ste_v |= (vsid << 12);
+	/*
+	 * The sllp value is an already shifted value with right bit
+	 * positioning.
+	 */
+	ste_v |= mmu_psize_defs[psize].sllp;
+	ste_v |= protection;
+
+	if (bolted)
+		ste_v  |= STE_BOLTED;
+
+
+	ste_e = esid << segment_shift(ssize);
+	ste_e |=  STE_VALID;
+
+	entry->ste_v = cpu_to_be64(ste_v);
+	/*
+	 * Make sure we have rest of values updated before marking the
+	 * ste entry valid
+	 */
+	smp_mb();
+	entry->ste_e = cpu_to_be64(ste_e);
+}
+
+static inline void __segment_load(mm_context_t *context, unsigned long ea,
+				  unsigned long vsid, int ssize, int psize,
+				  unsigned long protection, bool bolted)
+{
+	/*
+	 * Take the lock and check again if somebody else inserted
+	 * segment entry meanwhile. if so return
+	 */
+	spin_lock(context->seg_tbl_lock);
+
+	do_segment_load(context->seg_table, ea, vsid, ssize, psize,
+			protection, bolted);
+	spin_unlock(context->seg_tbl_lock);
+}
+
+static void segment_table_load(unsigned long ea)
+{
+	int ssize, psize;
+	unsigned long vsid;
+	unsigned long protection;
+	struct mm_struct *mm = current->mm;
+
+	if (!mm)
+		mm = &init_mm;
+	/*
+	 * We won't get segment fault for kernel mapping here, because
+	 * we bolt them all during task creation.
+	 */
+	switch (REGION_ID(ea)) {
+	case USER_REGION_ID:
+		psize = get_slice_psize(mm, ea);
+		ssize = user_segment_size(ea);
+		vsid = get_vsid(mm->context.id, ea, ssize);
+		protection = SLB_VSID_USER;
+		break;
+	default:
+		pr_err("We should not get slb fault on EA %lx\n", ea);
+		return;
+	}
+	return __segment_load(&mm->context, ea, vsid, ssize, psize,
+			      protection, false);
+}
+
 void handle_slb_miss(struct pt_regs *regs,
 		     unsigned long address, unsigned long trap)
 {
 	enum ctx_state prev_state = exception_enter();
 
-	slb_allocate(address);
+	if (mmu_has_feature(MMU_FTR_TYPE_SEG_TABLE))
+		segment_table_load(address);
+	else
+		slb_allocate(address);
 	exception_exit(prev_state);
+}
+
+
+static inline void insert_1T_segments(unsigned long seg_table, unsigned long start,
+				      unsigned long psize, int count)
+{
+	int i;
+	unsigned long vsid;
+
+	for (i = 0; i < count; i++) {
+		vsid = get_kernel_vsid(start, MMU_SEGSIZE_1T);
+		do_segment_load(seg_table, start, vsid, MMU_SEGSIZE_1T, psize,
+				SLB_VSID_KERNEL, true);
+		start += 1UL << 40;
+	}
+}
+
+static inline void insert_1T_segments_range(unsigned long seg_table, unsigned long start,
+					    unsigned long end, unsigned long psize)
+{
+	unsigned long vsid;
+
+	while (start < end) {
+		vsid = get_kernel_vsid(start, MMU_SEGSIZE_1T);
+		do_segment_load(seg_table, start, vsid, MMU_SEGSIZE_1T, psize,
+				SLB_VSID_KERNEL, true);
+		start += 1UL << 40;
+	}
+}
+
+static inline void segtbl_insert_kernel_mapping(unsigned long seg_table)
+{
+	/*
+	 * insert mapping for the full kernel. Map the entire kernel with 1TB segments
+	 * and we create mapping for max possible memory supported which at this
+	 * point is 64TB.
+	 */
+	/* We support 64TB address space now */
+	insert_1T_segments(seg_table, 0xC000000000000000UL, mmu_linear_psize, 64);
+	/*
+	 * We don't map the full VMALLOC region, because different part of that
+	 * have different base page size.
+	 */
+	insert_1T_segments_range(seg_table, H_VMALLOC_START,
+				 H_VMALLOC_END, mmu_vmalloc_psize);
+
+	insert_1T_segments_range(seg_table, H_VMALLOC_END,
+				 H_VMALLOC_START + H_KERN_VIRT_SIZE,
+				 mmu_io_psize);
+
+	insert_1T_segments_range(seg_table, H_SEG_PROC_TBL_START,
+				 H_SEG_PROC_TBL_END, mmu_linear_psize);
+#ifdef CONFIG_SPARSEMEM_VMEMMAP
+	insert_1T_segments(seg_table, H_VMEMMAP_BASE, mmu_vmemmap_psize, 64);
+#endif
+}
+
+#define PGALLOC_GFP (GFP_KERNEL | __GFP_NOTRACK | __GFP_REPEAT | __GFP_ZERO)
+unsigned long __init_refok segment_table_initialize(struct prtb_entry *prtb)
+{
+	unsigned long sllp;
+	unsigned long seg_table;
+	unsigned long seg_tb_vsid;
+	unsigned long seg_tb_vpn;
+	unsigned long prtb0, prtb1;
+	unsigned long segtb_align_size;
+
+	segtb_align_size = 1UL << mmu_psize_defs[mmu_linear_psize].shift;
+	/*
+	 * Fill in the process table.
+	 */
+	if (slab_is_available()) {
+		struct page *page;
+		/*
+		 * memory need to aligned to base page size. We continue to
+		 * use only SEGTB_SIZE part of the below allocated region.
+		 */
+		page = alloc_pages(PGALLOC_GFP,
+				   mmu_psize_defs[mmu_linear_psize].shift - PAGE_SHIFT);
+		if (!page)
+			return -ENOMEM;
+		seg_table = (unsigned long)page_address(page);
+	} else {
+		seg_table = (unsigned long)__va(memblock_alloc_base(segtb_align_size,
+						 segtb_align_size,
+						 MEMBLOCK_ALLOC_ANYWHERE));
+		memset((void *)seg_table, 0, segtb_align_size);
+	}
+	/*
+	 * Now fill with kernel mappings
+	 */
+	segtbl_insert_kernel_mapping(seg_table);
+	seg_tb_vsid = get_kernel_vsid(seg_table, mmu_kernel_ssize);
+	/*
+	 * our vpn shift is 12, so we can use the same function. lucky
+	 */
+	BUILD_BUG_ON_MSG(12 != VPN_SHIFT, "VPN_SHIFT is not 12");
+	seg_tb_vpn = hpt_vpn(seg_table, seg_tb_vsid, mmu_kernel_ssize);
+	/*
+	 * segment size
+	 */
+	prtb0 = (unsigned long)mmu_kernel_ssize << 62;
+	/*
+	 * seg table vpn already ignore the lower 12 bits of the virtual
+	 * address and is exactly STABORGU || STABORGL.
+	 */
+	prtb0 |= seg_tb_vpn >> 4;
+	prtb1 = (seg_tb_vpn & 0xf) << 60;
+	/*
+	 * stps field
+	 */
+	sllp = get_sllp_encoding(mmu_linear_psize);
+	prtb1 |= sllp << 1;
+	/*
+	 * set segment table size and valid bit
+	 */
+	prtb1 |= ((mmu_psize_defs[mmu_linear_psize].shift - 12) << 4 | 0x1);
+	prtb->prtb0 = cpu_to_be64(prtb0);
+	/*
+	 * Make sure we have rest of values updated before marking the
+	 * ste entry valid
+	 */
+	smp_wmb();
+	prtb->prtb1 = cpu_to_be64(prtb1);
+
+	return seg_table;
 }
