@@ -85,7 +85,7 @@ _GLOBAL(power7_powersave_common)
 power7_enter_nap_mode:
 #ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
 	/* Tell KVM we're napping */
-	li	r4,KVM_HWTHREAD_IN_NAP
+	li	r4,KVM_HWTHREAD_IN_IDLE
 	stb	r4,HSTATE_HWTHREAD_STATE(r13)
 #endif
 	stb	r3,PACA_THREAD_IDLE_STATE(r13)
