@@ -9,6 +9,7 @@
 #define PNV_THREAD_WINKLE               3
 #define PNV_CORE_IDLE_LOCK_BIT          0x100
 #define PNV_CORE_IDLE_THREAD_BITS       0x0FF
+#define PNV_THREAD_STOP_HYP_LOSS	4
 
 #ifndef __ASSEMBLY__
 extern u32 pnv_fastsleep_workaround_at_entry[];
