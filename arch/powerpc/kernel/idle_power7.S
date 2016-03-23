@@ -185,35 +185,6 @@ _GLOBAL(power7_winkle)
 	b	power7_powersave_common
 	/* No return */
 
-/*
- * Called from reset vector. Check whether we have woken up with
- * hypervisor state loss. If yes, restore hypervisor state and return
- * back to reset vector.
- */
-_GLOBAL(power7_restore_hyp_resource)
-	/*
-	 * Check if last bit of HSPGR0 is set. This indicates whether we are
-	 * waking up from winkle.
-	 */
-	GET_PACA(r13)
-	clrldi	r5,r13,63
-	clrrdi	r13,r13,1
-	cmpwi	cr4,r5,1
-	mtspr	SPRN_HSPRG0,r13
-
-	lbz	r0,PACA_THREAD_IDLE_STATE(r13)
-	cmpwi   cr2,r0,PNV_THREAD_NAP
-	bgt     cr2,power7_wakeup_tb_loss	/* Either sleep or Winkle */
-
-	/*
-	 * We fall through here if PACA_THREAD_IDLE_STATE shows we are waking
-	 * up from nap. At this stage CR3 shouldn't contains 'gt' since that
-	 * indicates we are waking with hypervisor state loss from nap.
-	 */
-	bgt	cr3,.
-
-	blr
-
 _GLOBAL(power7_wakeup_tb_loss)
 	ld	r2,PACATOC(r13);
 	ld	r1,PACAR1(r13)
@@ -388,44 +359,3 @@ fastsleep_workaround_at_exit:
 	li	r0,OPAL_CONFIG_CPU_IDLE_STATE
 	bl	opal_call_realmode
 	b	timebase_resync
-
-/*
- * R3 here contains the value that will be returned to the caller
- * of power7_nap.
- */
-_GLOBAL(power7_wakeup_loss)
-	ld	r1,PACAR1(r13)
-BEGIN_FTR_SECTION
-	CHECK_HMI_INTERRUPT
-END_FTR_SECTION_IFSET(CPU_FTR_HVMODE)
-	REST_NVGPRS(r1)
-	REST_GPR(2, r1)
-	ld	r6,_CCR(r1)
-	ld	r4,_MSR(r1)
-	ld	r5,_NIP(r1)
-	addi	r1,r1,INT_FRAME_SIZE
-	mtcr	r6
-	mtspr	SPRN_SRR1,r4
-	mtspr	SPRN_SRR0,r5
-	rfid
-
-/*
- * R3 here contains the value that will be returned to the caller
- * of power7_nap.
- */
-_GLOBAL(power7_wakeup_noloss)
-	lbz	r0,PACA_NAPSTATELOST(r13)
-	cmpwi	r0,0
-	bne	power7_wakeup_loss
-BEGIN_FTR_SECTION
-	CHECK_HMI_INTERRUPT
-END_FTR_SECTION_IFSET(CPU_FTR_HVMODE)
-	ld	r1,PACAR1(r13)
-	ld	r6,_CCR(r1)
-	ld	r4,_MSR(r1)
-	ld	r5,_NIP(r1)
-	addi	r1,r1,INT_FRAME_SIZE
-	mtcr	r6
-	mtspr	SPRN_SRR1,r4
-	mtspr	SPRN_SRR0,r5
-	rfid
