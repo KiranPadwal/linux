@@ -29,7 +29,7 @@
 
 static u32 supported_cpuidle_states;
 
-int pnv_save_sprs_for_winkle(void)
+int pnv_save_sprs_for_deep_states(void)
 {
 	int cpu;
 	int rc;
@@ -130,8 +130,8 @@ static void pnv_alloc_idle_core_states(void)
 
 	update_subcore_sibling_mask();
 
-	if (supported_cpuidle_states & OPAL_PM_WINKLE_ENABLED)
-		pnv_save_sprs_for_winkle();
+	if (supported_cpuidle_states & OPAL_PM_LOSE_FULL_CONTEXT)
+		pnv_save_sprs_for_deep_states();
 }
 
 u32 pnv_get_supported_cpuidle_states(void)
@@ -286,8 +286,19 @@ static int __init pnv_init_idle_states(void)
 
 	pnv_alloc_idle_core_states();
 
+	if (supported_cpuidle_states & OPAL_PM_STOP_INST_FAST)
+		for_each_possible_cpu(i) {
+			uint64_t psscr_init_val = PSSCR_ESL | PSSCR_EC | \
+						PSSCR_PSLL_MASK | PSSCR_TR_MASK | \
+						PSSCR_MTL_MASK;
+			paca[i].thread_psscr = psscr_init_val;
+			mb();
+		}
+
 	if (supported_cpuidle_states & OPAL_PM_NAP_ENABLED)
 		ppc_md.power_save = power7_idle;
+	else if (supported_cpuidle_states & OPAL_PM_STOP_INST_FAST)
+		ppc_md.power_save = power_stop0;
 out_free:
 	kfree(flags);
 out:
