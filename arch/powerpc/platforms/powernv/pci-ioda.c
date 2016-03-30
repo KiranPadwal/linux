@@ -329,7 +329,7 @@ static void __init pnv_ioda_parse_m64_window(struct pnv_phb *phb)
 	u64 pci_addr;
 
 	/* FIXME: Support M64 for P7IOC */
-	if (phb->type != PNV_PHB_IODA2) {
+	if (phb->type != PNV_PHB_IODA2 && phb->type != PNV_PHB_IODA3) {
 		pr_info("  Not support M64 window\n");
 		return;
 	}
@@ -1401,7 +1401,7 @@ void pnv_pci_sriov_disable(struct pci_dev *pdev)
 	/* Release VF PEs */
 	pnv_ioda_release_vf_PE(pdev);
 
-	if (phb->type == PNV_PHB_IODA2) {
+	if (phb->type == PNV_PHB_IODA2 || phb->type == PNV_PHB_IODA3) {
 		if (!pdn->m64_single_mode)
 			pnv_pci_vf_resource_shift(pdev, -*pdn->pe_num_map);
 
@@ -1495,7 +1495,7 @@ int pnv_pci_sriov_enable(struct pci_dev *pdev, u16 num_vfs)
 	phb = hose->private_data;
 	pdn = pci_get_pdn(pdev);
 
-	if (phb->type == PNV_PHB_IODA2) {
+	if (phb->type == PNV_PHB_IODA2 || phb->type == PNV_PHB_IODA3) {
 		if (!pdn->vfs_expanded) {
 			dev_info(&pdev->dev, "don't support this SRIOV device"
 				" with non 64bit-prefetchable IOV BAR\n");
@@ -2299,6 +2299,7 @@ static void pnv_pci_ioda_setup_opal_tce_kill(struct pnv_phb *phb)
 	if (!swinvp)
 		return;
 
+	printk("TCE Kill reg %016llx\n", be64_to_cpup(swinvp));
 	phb->ioda.tce_inval_reg_phys = be64_to_cpup(swinvp);
 	phb->ioda.tce_inval_reg = ioremap(phb->ioda.tce_inval_reg_phys, 8);
 }
@@ -2536,7 +2537,7 @@ static void pnv_ioda_setup_dma(struct pnv_phb *phb)
 			pe_info(pe, "DMA weight %d, assigned %d DMA32 segments\n",
 				pe->dma_weight, segs);
 			pnv_pci_ioda_setup_dma_pe(phb, pe, base, segs);
-		} else if (phb->type == PNV_PHB_IODA2) {
+		} else if (phb->type == PNV_PHB_IODA2 || phb->type == PNV_PHB_IODA3) {
 			pe_info(pe, "Assign DMA32 space\n");
 			segs = 0;
 			pnv_pci_ioda2_setup_dma_pe(phb, pe);
@@ -3426,6 +3427,11 @@ static void __init pnv_pci_init_ioda_phb(struct device_node *np,
 	/* Remove M64 resource if we can't configure it successfully */
 	if (!phb->init_m64 || phb->init_m64(phb))
 		hose->mem_resources[1].flags = 0;
+}
+
+void __init pnv_pci_init_ioda3_phb(struct device_node *np)
+{
+	pnv_pci_init_ioda_phb(np, 0, PNV_PHB_IODA3);
 }
 
 void __init pnv_pci_init_ioda2_phb(struct device_node *np)

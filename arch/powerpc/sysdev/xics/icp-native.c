@@ -329,11 +329,6 @@ int __init icp_native_init(void)
 	u32 indx = 0;
 	int found = 0;
 
-	if (pvr_version_is(PVR_POWER9)) {
-		icp_ops = &icp_native_ops;
-		return 0;
-	}
-
 	for_each_compatible_node(np, NULL, "ibm,ppc-xicp")
 		if (icp_native_init_one_node(np, &indx) == 0)
 			found = 1;

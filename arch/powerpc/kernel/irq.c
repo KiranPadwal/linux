@@ -479,6 +479,8 @@ static inline void check_stack_overflow(void)
 void __do_irq(struct pt_regs *regs)
 {
 	unsigned int irq;
+	bool arch_iterate_get_irq;
+	bool got_irq = false;
 
 	irq_enter();
 
@@ -486,21 +488,29 @@ void __do_irq(struct pt_regs *regs)
 
 	check_stack_overflow();
 
-	/*
-	 * Query the platform PIC for the interrupt & ack it.
-	 *
-	 * This will typically lower the interrupt line to the CPU
-	 */
-	irq = ppc_md.get_irq();
+	/* XXX This needs to be set for XIVE ... */
+	arch_iterate_get_irq = true;
 
-	/* We can hard enable interrupts now to allow perf interrupts */
-	may_hard_irq_enable();
+	do {
+		/*
+		 * Query the platform PIC for the interrupt & ack it.
+		 *
+		 * This will typically lower the interrupt line to the CPU
+		 */
+		irq = ppc_md.get_irq();
 
-	/* And finally process it */
-	if (unlikely(irq == NO_IRQ))
-		__this_cpu_inc(irq_stat.spurious_irqs);
-	else
-		generic_handle_irq(irq);
+		/* We can hard enable interrupts now to allow perf interrupts */
+		may_hard_irq_enable();
+
+		/* And finally process it */
+		if (unlikely(irq == NO_IRQ)) {
+			if (!got_irq)
+				__this_cpu_inc(irq_stat.spurious_irqs);
+			break;
+		} else
+			generic_handle_irq(irq);
+		got_irq = true;
+	} while(arch_iterate_get_irq);
 
 	trace_irq_exit(regs);
 
