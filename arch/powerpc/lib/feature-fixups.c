@@ -181,7 +181,7 @@ void do_feature_fixups_in_c(unsigned long value, void *fixup_start,
 
 			if (patch_branch(fcur->code, target, 0)) {
 				WARN_ON(1);
-				pr_err("Unable to patch radix section at %p\n",
+				pr_err("Unable to patch feature fixup section at %p\n",
 				       fcur->code);
 			}
 		}

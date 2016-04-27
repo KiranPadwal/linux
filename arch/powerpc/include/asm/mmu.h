@@ -139,7 +139,7 @@ enum {
 		0,
 };
 
-static inline int mmu_has_feature(unsigned long feature)
+static inline int __mmu_has_feature(unsigned long feature)
 {
 	return (MMU_FTRS_POSSIBLE & cur_cpu_spec->mmu_features & feature);
 }
@@ -169,7 +169,7 @@ static inline void assert_pte_locked(struct mm_struct *mm, unsigned long addr)
 #endif /* !CONFIG_DEBUG_VM */
 
 #ifdef HAVE_JUMP_LABEL
-static __always_inline bool mmu_feature_enabled(unsigned long feature)
+static __always_inline bool mmu_has_feature(unsigned long feature)
 {
 	asm_volatile_goto("1:\n\t"
 			  ".pushsection __mmu_ftr_fixup_c,  \"a\"\n\t"
@@ -179,16 +179,16 @@ static __always_inline bool mmu_feature_enabled(unsigned long feature)
 			  JUMP_ENTRY_TYPE "%l[l_false]\n\t"
 			  ".popsection\n\t"
 			  : : "i"(feature) : : l_true, l_false);
-	if (mmu_has_feature(feature))
+	if (__mmu_has_feature(feature))
 l_true:
 		return true;
 l_false:
 	return false;
 }
 #else
-static __always_inline bool mmu_feature_enabled(unsigned long feature)
+static __always_inline bool mmu_has_feature(unsigned long feature)
 {
-	if (mmu_has_feature(feature))
+	if (__mmu_has_feature(feature))
 		return true;
 	return false;
 }
