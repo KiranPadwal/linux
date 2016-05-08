@@ -109,7 +109,7 @@ _GLOBAL(power_stop_wakeup_hyp_loss)
 	 * and they are restored before switching to the process context. Hence
 	 * until they are restored, they are free to be used.
 	 *
-	 * Save SRR1 in a NVGPR as it might be clobbered in opal_call_realmode
+	 * Save SRR1 in a NVGPR as it might be clobbered in opal calls
 	 * (called in CHECK_HMI_INTERRUPT). SRR1 is required to determine the
 	 * wakeup reason if we branch to kvm_start_guest.
 	 */
@@ -193,8 +193,7 @@ timebase_resync:
 	 * set in exceptions-64s.S */
 	ble	cr3,clear_lock
 	/* Time base re-sync */
-	li	r0,OPAL_RESYNC_TIMEBASE
-	bl	opal_call_realmode;
+	bl	opal_rm_resync_timebase;
 
 	/*
 	 * If waking up from sleep, per core state is not lost, skip to
