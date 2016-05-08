@@ -162,7 +162,8 @@
 #define OPAL_INT_SET_CPPR			119
 #define OPAL_INT_EOI				120
 #define OPAL_INT_SET_MFRR			121
-#define OPAL_LAST				121
+#define OPAL_PCI_TCE_KILL			122
+#define OPAL_LAST				122
 
 /* Device tree flags */
 
@@ -899,6 +900,13 @@ enum OpalSysCooling {
 enum {
 	OPAL_REBOOT_NORMAL		= 0,
 	OPAL_REBOOT_PLATFORM_ERROR	= 1,
+};
+
+/* Argument to OPAL_PCI_TCE_KILL */
+enum {
+	OPAL_PCI_TCE_KILL_PAGES,
+	OPAL_PCI_TCE_KILL_PE,
+	OPAL_PCI_TCE_KILL_ALL,
 };
 
 #endif /* __ASSEMBLY__ */
