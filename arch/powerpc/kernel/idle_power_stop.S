@@ -192,9 +192,7 @@ timebase_resync:
 	/* Do timebase resync if we are waking up from sleep. Use cr3 value
 	 * set in exceptions-64s.S */
 	ble	cr3,clear_lock
-	/* Time base re-sync */
-	li	r0,OPAL_RESYNC_TIMEBASE
-	bl	opal_call_realmode;
+	bl	opal_rm_resync_timebase;
 
 	/*
 	 * If waking up from sleep, per core state is not lost, skip to

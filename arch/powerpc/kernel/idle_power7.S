@@ -124,8 +124,7 @@ fastsleep_workaround_at_entry:
 	/* Fast sleep workaround */
 	li	r3,1
 	li	r4,1
-	li	r0,OPAL_CONFIG_CPU_IDLE_STATE
-	bl	opal_call_realmode
+	bl	opal_rm_config_cpu_idle_state
 
 	/* Clear Lock bit */
 	li	r0,0
@@ -184,6 +183,24 @@ _GLOBAL(power7_winkle)
 	li	r4,1
 	b	power7_powersave_common
 	/* No return */
+
+#define CHECK_HMI_INTERRUPT						\
+	mfspr	r0,SPRN_SRR1;						\
+BEGIN_FTR_SECTION_NESTED(66);						\
+	rlwinm	r0,r0,45-31,0xf;  /* extract wake reason field (P8) */	\
+FTR_SECTION_ELSE_NESTED(66);						\
+	rlwinm	r0,r0,45-31,0xe;  /* P7 wake reason field is 3 bits */	\
+ALT_FTR_SECTION_END_NESTED_IFSET(CPU_FTR_ARCH_207S, 66);		\
+	cmpwi	r0,0xa;			/* Hypervisor maintenance ? */	\
+	bne	20f;							\
+	/* Invoke opal call to handle hmi */				\
+	ld	r2,PACATOC(r13);					\
+	ld	r1,PACAR1(r13);						\
+	std	r3,ORIG_GPR3(r1);	/* Save original r3 */		\
+	bl	opal_rm_handle_hmi;					\
+	ld	r3,ORIG_GPR3(r1);	/* Restore original r3 */	\
+20:	nop;
+
 
 _GLOBAL(power7_wakeup_tb_loss)
 	ld	r2,PACATOC(r13);
@@ -289,10 +306,7 @@ timebase_resync:
 	 * set in exceptions-64s.S */
 	ble	cr3,clear_lock
 	/* Time base re-sync */
-	li	r0,OPAL_RESYNC_TIMEBASE
-	bl	opal_call_realmode;
-	/* TODO: Check r3 for failure */
-
+	bl	opal_rm_resync_timebase;
 	/*
 	 * If waking up from sleep, per core state is not lost, skip to
 	 * clear_lock.
@@ -356,6 +370,5 @@ hypervisor_state_restored:
 fastsleep_workaround_at_exit:
 	li	r3,1
 	li	r4,0
-	li	r0,OPAL_CONFIG_CPU_IDLE_STATE
-	bl	opal_call_realmode
+	bl	opal_rm_config_cpu_idle_state
 	b	timebase_resync
