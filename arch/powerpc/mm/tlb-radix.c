@@ -139,9 +139,10 @@ void radix__local_flush_tlb_pwc(struct mmu_gather *tlb, unsigned long addr)
 EXPORT_SYMBOL(radix__local_flush_tlb_pwc);
 
 void radix__local_flush_tlb_page_psize(struct mm_struct *mm, unsigned long vmaddr,
-				       unsigned long ap)
+				       int psize)
 {
 	unsigned long pid;
+	unsigned long ap = mmu_get_ap(psize);
 
 	preempt_disable();
 	pid = mm ? mm->context.id : 0;
@@ -158,7 +159,7 @@ void radix__local_flush_tlb_page(struct vm_area_struct *vma, unsigned long vmadd
 		return __local_flush_hugetlb_page(vma, vmaddr);
 #endif
 	radix__local_flush_tlb_page_psize(vma ? vma->vm_mm : NULL, vmaddr,
-					  mmu_get_ap(mmu_virtual_psize));
+					  mmu_virtual_psize);
 }
 EXPORT_SYMBOL(radix__local_flush_tlb_page);
 
@@ -213,9 +214,10 @@ no_context:
 EXPORT_SYMBOL(radix__flush_tlb_pwc);
 
 void radix__flush_tlb_page_psize(struct mm_struct *mm, unsigned long vmaddr,
-				 unsigned long ap)
+				 int psize)
 {
 	unsigned long pid;
+	unsigned long ap = mmu_get_ap(psize);
 
 	preempt_disable();
 	pid = mm ? mm->context.id : 0;
@@ -242,7 +244,7 @@ void radix__flush_tlb_page(struct vm_area_struct *vma, unsigned long vmaddr)
 		return flush_hugetlb_page(vma, vmaddr);
 #endif
 	radix__flush_tlb_page_psize(vma ? vma->vm_mm : NULL, vmaddr,
-				    mmu_get_ap(mmu_virtual_psize));
+				    mmu_virtual_psize);
 }
 EXPORT_SYMBOL(radix__flush_tlb_page);
 
