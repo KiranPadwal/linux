@@ -501,7 +501,14 @@ static void do_segment_load(unsigned long seg_table, unsigned long ea,
 	smp_mb();
 
 	ste_v = (unsigned long)ssize << 62;
-	ste_v |= (vsid << 12);
+
+	/*
+	 * work around till mambo fix the bug
+	 */
+	if (ssize == MMU_SEGSIZE_256M)
+		ste_v |= (vsid << 12);
+	else
+		ste_v |= (vsid << (SID_SHIFT_1T - SID_SHIFT + 12));
 	/*
 	 * The sllp value is an already shifted value with right bit
 	 * positioning.
