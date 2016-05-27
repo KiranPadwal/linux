@@ -361,6 +361,7 @@
 #define   LPCR_LPES1    	ASM_CONST(0x0000000000000004)      /* LPAR Env selector 1 */
 #define   LPCR_LPES_SH	2
 #define   LPCR_RMI      	ASM_CONST(0x0000000000000002)      /* real mode is cache inhibit */
+#define   LPCR_HVICE    	ASM_CONST(0x0000000000000002)      /* P9: HV interrupt enable */
 #define   LPCR_HDICE    	ASM_CONST(0x0000000000000001)      /* Hyp Decr enable (HV,PR,EE) */
 #define   LPCR_UPRT     	ASM_CONST(0x0000000000400000)      /* Use Process Table (ISA 3) */
 #define	  LPCR_HR       	ASM_CONST(0x0000000000100000)
