@@ -98,6 +98,15 @@ int dt_is_compatible(void *node, const char *compat);
 void dt_get_reg_format(void *node, u32 *naddr, u32 *nsize);
 int dt_get_virtual_reg(void *node, void **addr, int nres);
 
+#ifdef HAS_OPAL
+void opal_init(void);
+int opal_console_init(void *devp, struct serial_console_data *scdp);
+#else
+static inline void opal_init(void) { }
+static inline int opal_console_init(void *devp, struct serial_console_data *scdp)
+{ return -1; }
+#endif
+
 static inline void *finddevice(const char *name)
 {
 	return (dt_ops.finddevice) ? dt_ops.finddevice(name) : NULL;

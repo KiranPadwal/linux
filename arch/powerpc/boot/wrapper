@@ -175,6 +175,9 @@ make_space=y
 case "$platform" in
 of)
     platformo="$object/of.o $object/epapr.o"
+    if [ "$format" != "elf32ppc" ]; then
+	platformo= "$platformo $object/opal.o $object/opal-calls.o"
+    fi
     make_space=n
     ;;
 pseries)
@@ -183,6 +186,7 @@ pseries)
     if [ "$format" != "elf32ppc" ]; then
 	link_address=
 	pie=-pie
+	platformo="$platformo $object/opal.o $object/opal-calls.o"
     fi
     make_space=n
     ;;
@@ -295,6 +299,9 @@ treeboot-iss4xx-mpic)
     ;;
 epapr)
     platformo="$object/pseries-head.o $object/epapr.o $object/epapr-wrapper.o"
+    if [ "$format" != "elf32ppc" ]; then
+	platformo="$platformo $object/opal.o $object/opal-calls.o"
+    fi
     link_address='0x20000000'
     pie=-pie
     ;;

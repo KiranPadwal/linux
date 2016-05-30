@@ -61,6 +61,8 @@ void epapr_platform_init(unsigned long r3, unsigned long r4, unsigned long r5,
 
 	fdt_init((void *)fdt_addr);
 
+	opal_init();
+
 	serial_console_init();
 	platform_ops.fixups = platform_fixups;
 }
